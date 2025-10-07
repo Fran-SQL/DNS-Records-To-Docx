@@ -23,6 +23,36 @@ Before using this script, the process of gathering these data was done manually,
 
 Run the script, specify the domain to be analyzed, and a docx file with the results will be generated.
 
+Maybe you need to install some libraries first. In that case you can use the requirements.txt file to do that:
+
+```bash
+pip install -r requirements.txt
+```
+
+Then you are ready to run the script:
+
+```bash:
+python dns_records_to_docx.py
+```
+
+The script will print a message, asking you to put the domain you want to analyze. Then you just have to write the domain and press enter. 
+The script will generate a .docx file with the data gathered. For this example I wrote "github.com": 
+
+```Enter the domain to analyze (e.g., example.com): github.com
+Obtaining DNS records for github.com...
+Document 'DNS_records_github_com.docx' successfully generated.
+```
+
+## Results
+The generated .docx report will include the following information:
+- **Report Title**: The title will feature the **domain analyzed**.
+- **Timestamp**: The date and time when the DNS data was gathered.
+- **DNS Records**: A structured listing of the following record types:
+  - **A Records**
+  - **MX Records**
+  - **NS Records**
+  - **TXT Records**
+
 ## ⚠️ Responsible use
 
 This script has been designed for the purpose of **collecting public DNS information** and generating structured reports for **legitimate purposes of auditing, security analysis, research, or network administration**.
