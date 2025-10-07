@@ -25,13 +25,15 @@ Run the script, specify the domain to be analyzed, and a docx file with the resu
 
 Maybe you need to install some libraries first. In that case you can use the requirements.txt file to do that:
 
-```bash
+bash:
+```
 pip install -r requirements.txt
 ```
 
 Then you are ready to run the script:
 
-```bash:
+bash:
+```
 python dns_records_to_docx.py
 ```
 
