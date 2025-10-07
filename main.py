@@ -186,7 +186,7 @@ def create_dns_report_doc(domain, dns_data, output_filename="informe_dns.docx"):
 
 # --- Use of the Script ---
 if __name__ == "__main__":
-    target_domain = input("Enter the domain to analyze (e.g., google.com): ")
+    target_domain = input("Enter the domain to analyze (e.g.: example.com): ")
 
     if not target_domain:
         print("No domain was entered. Exiting.")
