@@ -1,201 +1,169 @@
 import dns.resolver
 import dns.exception
 from docx import Document
-from docx.shared import Inches, Pt
+from docx.shared import Inches, Pt, RGBColor
 from docx.enum.text import WD_ALIGN_PARAGRAPH
+from docx.oxml import OxmlElement
 from datetime import datetime
+from docx.oxml.ns import qn
 
 def resolve_hostname_to_ip(hostname):
-    """
-    Resolves a hostname to its IPv4 or IPv6 address.
-    Returns the first IP found or ‘N/A’ if it cannot be resolved.
-    """
     try:
-        # Try resolving A (IPv4)
         answers = dns.resolver.resolve(hostname, 'A')
         for rdata in answers:
             return str(rdata)
     except (dns.resolver.NoAnswer, dns.resolver.NXDOMAIN):
-        pass # It doesn't have an A record, we tried AAAA.
-
+        pass
     try:
-        # Trying to resolve AAAA (IPv6)
         answers = dns.resolver.resolve(hostname, 'AAAA')
         for rdata in answers:
             return str(rdata)
     except (dns.resolver.NoAnswer, dns.resolver.NXDOMAIN):
-        pass # It doesn't have an AAAA record.
-
+        pass
     except dns.exception.Timeout:
         return "Time limit exceeded"
     except Exception:
-        return "N/A" # Other errors
-
-    return "N/A" # If no IP was found
+        return "N/A"
+    return "N/A"
 
 def get_dns_records(domain):
-    """
-    Obtains various types of DNS records for a given domain, including NS and MX IPs.
-    """
-    records = {
-        "A": [],    # Host / IPv4
-        "AAAA": [], # Host / IPv6
-        "MX": [],   # Mail Exchanger
-        "NS": [],   # Name Servers
-        "TXT": [],  # Text records
-        "CNAME": [],# Canonical Name
-    }
+    records = {"A": [], "AAAA": [], "MX": [], "NS": [], "TXT": [], "CNAME": []}
+    record_types = list(records.keys())
 
-    main_record_types = ["A", "AAAA", "MX", "NS", "TXT", "CNAME"]
-
-    for record_type in main_record_types:
+    for record_type in record_types:
         try:
             answers = dns.resolver.resolve(domain, record_type)
             for rdata in answers:
                 if record_type == "MX":
-                    exchange_hostname = str(rdata.exchange).rstrip('.')
-                    exchange_ip = resolve_hostname_to_ip(exchange_hostname)
-                    records[record_type].append({
-                        "priority": rdata.preference,
-                        "exchange": exchange_hostname,
-                        "ip": exchange_ip
-                    })
+                    exchange = str(rdata.exchange).rstrip('.')
+                    ip = resolve_hostname_to_ip(exchange)
+                    records["MX"].append({"priority": rdata.preference, "exchange": exchange, "ip": ip})
                 elif record_type == "NS":
-                    ns_hostname = str(rdata).rstrip('.')
-                    ns_ip = resolve_hostname_to_ip(ns_hostname)
-                    records[record_type].append({
-                        "name": ns_hostname,
-                        "ip": ns_ip
-                    })
+                    ns_name = str(rdata).rstrip('.')
+                    ip = resolve_hostname_to_ip(ns_name)
+                    records["NS"].append({"name": ns_name, "ip": ip})
                 else:
                     records[record_type].append(str(rdata).rstrip('.'))
         except dns.resolver.NoAnswer:
-            pass
+            continue
         except dns.resolver.NXDOMAIN:
             print(f"Error: Domain '{domain}' not found (NXDOMAIN).")
             return None
         except dns.exception.Timeout:
-            print(f"Error: Timeout while querying '{domain}'.")
+            print(f"Timeout while querying '{domain}'.")
             return None
         except Exception as e:
-            print(f"Unexpected error while getting records {record_type} from {domain}: {e}")
-            pass
-
-    # Remove duplicates and sort some types of records
-    for key in ["A", "AAAA", "TXT", "CNAME"]:
-        records[key] = sorted(list(set(records[key])))
-    # NS and MX are dictionaries, the set doesn't work directly, we handle it separately.
-    # Removal of duplicates for NS and MX (based on the name/exchange for NS, on the priority-exchange pair for MX)
-    unique_ns = []
-    seen_ns_names = set()
-    for ns_rec in records["NS"]:
-        if ns_rec["name"] not in seen_ns_names:
-            unique_ns.append(ns_rec)
-            seen_ns_names.add(ns_rec["name"])
-    records["NS"] = sorted(unique_ns, key=lambda x: x["name"])
-
-    unique_mx = []
-    seen_mx_tuples = set()
-    for mx_rec in records["MX"]:
-        mx_tuple = (mx_rec["priority"], mx_rec["exchange"])
-        if mx_tuple not in seen_mx_tuples:
-            unique_mx.append(mx_rec)
-            seen_mx_tuples.add(mx_tuple)
-    records["MX"] = sorted(unique_mx, key=lambda x: x["priority"])
-
+            print(f"Unexpected error: {e}")
+            continue
     return records
 
+def add_stylish_table(document, headers, rows):
+    """Add a styled table with custom formatting."""
+    table = document.add_table(rows=1, cols=len(headers))
+    table.style = 'Light List Accent 1'
+    hdr_cells = table.rows[0].cells
+
+    for i, header in enumerate(headers):
+        hdr_cells[i].text = header
+        run = hdr_cells[i].paragraphs[0].runs[0]
+        run.bold = True
+        run.font.color.rgb = RGBColor(255, 255, 255)
+        hdr_cells[i].paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
+
+        # --- Color de fondo corregido ---
+        shading = OxmlElement("w:shd")
+        shading.set(qn("w:val"), "clear")
+        shading.set(qn("w:color"), "auto")
+        shading.set(qn("w:fill"), "2F5496")  # color azul oscuro
+        hdr_cells[i]._element.get_or_add_tcPr().append(shading)
+
+    # --- Filas ---
+    for row in rows:
+        row_cells = table.add_row().cells
+        for i, value in enumerate(row):
+            row_cells[i].text = str(value)
+            row_cells[i].paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
+
+    # Ajuste opcional de ancho de columnas
+    for cell in table.columns[0].cells:
+        cell.width = Inches(1.5)
+
+    return table
+
 def create_dns_report_doc(domain, dns_data, output_filename="informe_dns.docx"):
-    """
-    Create a docx document with the DNS data.
-    """
     document = Document()
 
-    # --- Document Configuration ---
-    sections = document.sections
-    for section in sections:
-        section.top_margin = Inches(0.8)
-        section.bottom_margin = Inches(0.8)
+    # --- Margins ---
+    for section in document.sections:
+        section.top_margin = Inches(1)
+        section.bottom_margin = Inches(1)
         section.left_margin = Inches(1)
         section.right_margin = Inches(1)
 
-    # --- Main Title ---
-    title_run = document.add_heading(level=0).add_run(f"DNS report for {domain}")
-    title_run.font.name = 'Arial'
-    title_run.font.size = Pt(28)
-    document.paragraphs[-1].alignment = WD_ALIGN_PARAGRAPH.CENTER
+    # --- Cover Page ---
+    title = document.add_heading(f"DNS Report\n{domain}", level=0)
+    title.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    title.runs[0].font.size = Pt(32)
+    title.runs[0].font.color.rgb = RGBColor(47, 84, 150)
+    document.add_paragraph("\n")
+
+    info = document.add_paragraph()
+    info.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    info.add_run(datetime.now().strftime("%d %B %Y")).font.size = Pt(11)
+    document.add_page_break()
+
+    # --- Header & Footer ---
+    section = document.sections[0]
+    header = section.header.paragraphs[0]
+    header.text = f"DNS Report - {domain}"
+    header.style = document.styles['Normal']
+    header.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    footer = section.footer.paragraphs[0]
+    footer.text = "Confidential Report — Generated Automatically"
+    footer.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    footer.runs[0].font.size = Pt(9)
+    footer.runs[0].font.color.rgb = RGBColor(150, 150, 150)
+
+    # --- DNS Data ---
+    document.add_heading("1. Overview", level=1)
+    document.add_paragraph(f"Below are the DNS records collected for the domain {domain}. The data were collected on {datetime.now().strftime('%d %B %Y, %H:%M')}.")
     document.add_paragraph()
 
-    # --- Generation Date ---
-    date_paragraph = document.add_paragraph()
-    date_paragraph.add_run(f"Generated on {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}").font.size = Pt(10)
-    date_paragraph.alignment = WD_ALIGN_PARAGRAPH.RIGHT
-    document.add_paragraph()
+    order = ["A", "AAAA", "MX", "NS", "TXT", "CNAME"]
+    for idx, record_type in enumerate(order, start=2):
+        data = dns_data.get(record_type)
+        if not data:
+            continue
 
-    # --- DNS Record Sections ---
-    record_order = ["A", "AAAA", "MX", "NS", "TXT", "CNAME"]
-    for record_type in record_order:
-        data_list = dns_data.get(record_type)
-        if data_list: # Only add section if there is data
-            document.add_heading(f"{record_type} records", level=1) # Section Title
+        document.add_heading(f"{idx}. {record_type} Records", level=1)
+        document.add_paragraph()
 
-            if record_type == "MX":
-                # Table for MX records (priority, host, IP)
-                table = document.add_table(rows=1, cols=3) # 3 columns
-                table.style = 'Table Grid'
-                hdr_cells = table.rows[0].cells
-                hdr_cells[0].text = 'Priority'
-                hdr_cells[1].text = 'MX server'
-                hdr_cells[2].text = 'IP'
-                for cell in hdr_cells:
-                    cell.paragraphs[0].runs[0].bold = True
-                    cell.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
+        if record_type == "MX":
+            rows = [[r["priority"], r["exchange"], r["ip"]] for r in data]
+            add_stylish_table(document, ["Priority", "Exchange", "IP"], rows)
+        elif record_type == "NS":
+            rows = [[r["name"], r["ip"]] for r in data]
+            add_stylish_table(document, ["Name Server", "IP Address"], rows)
+        elif record_type in ["A", "AAAA", "CNAME", "TXT"]:
+            for item in data:
+                p = document.add_paragraph(style='List Bullet')
+                p.add_run(item)
+        document.add_paragraph()
 
-                for item in data_list:
-                    row_cells = table.add_row().cells
-                    row_cells[0].text = str(item["priority"])
-                    row_cells[1].text = item["exchange"]
-                    row_cells[2].text = item["ip"]
-                    row_cells[0].paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
-                document.add_paragraph()
+    # --- Save ---
+    document.save(output_filename)
+    print(f"Report successfully generated: {output_filename}")
 
-            elif record_type == "NS":
-                # List for NS records with their IPs
-                for item in data_list:
-                    p = document.add_paragraph(style='List Bullet')
-                    p.add_run(f"{item['name']} ({item['ip']})")
-                document.add_paragraph()
-
-            elif record_type in ["A", "AAAA", "CNAME", "TXT"]:
-                # List with bullet points for other types of records
-                for item in data_list:
-                    p = document.add_paragraph(style='List Bullet')
-                    p.add_run(item)
-                document.add_paragraph()
-            else:
-                for item in data_list:
-                    document.add_paragraph(str(item))
-                document.add_paragraph()
-
-    # --- Save the docx ---
-    try:
-        document.save(output_filename)
-        print(f"Document '{output_filename}' successfully generated.")
-    except Exception as e:
-        print(f"Error saving the document: {e}")
-
-# --- Use of the Script ---
+# --- Run ---
 if __name__ == "__main__":
-    target_domain = input("Enter the domain to analyze (e.g.: example.com): ")
-
+    target_domain = input("Enter domain to analyze (e.g. example.com): ").strip()
     if not target_domain:
-        print("No domain was entered. Exiting.")
+        print("No domain entered. Exiting.")
     else:
-        print(f"Obtaining DNS records for {target_domain}...")
-        dns_data = get_dns_records(target_domain)
-
-        if dns_data:
-            output_filename = f"DNS_records_{target_domain.replace('.', '_')}.docx"
-            create_dns_report_doc(target_domain, dns_data, output_filename)
+        print(f"Collecting DNS data for {target_domain}...")
+        data = get_dns_records(target_domain)
+        if data:
+            filename = f"DNS_Report_{target_domain.replace('.', '_')}.docx"
+            create_dns_report_doc(target_domain, data, filename)
         else:
-            print("The DNS data could not be obtained or the domain is not valid/reachable.")
+            print("Failed to collect DNS data.")
